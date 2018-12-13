@@ -52,9 +52,9 @@ class RegionProposalNetwork(nn.Module):
         self.feat_stride = feat_stride
         self.proposal_layer = ProposalCreator(self, **proposal_creator_params)
         n_anchor = self.anchor_base.shape[0]
-        self.conv1 = nn.Conv2d(in_channels, mid_channels, 3, 1, 1)
-        self.score = nn.Conv2d(mid_channels, n_anchor * 2, 1, 1, 0)
-        self.loc = nn.Conv2d(mid_channels, n_anchor * 4, 1, 1, 0)
+        self.conv1 = nn.Conv2d(in_channels, mid_channels, kernel_size=3, stride=1, padding=1)
+        self.score = nn.Conv2d(mid_channels, n_anchor * 2, kernel_size=1, stride=1, padding=0)
+        self.loc = nn.Conv2d(mid_channels, n_anchor * 4, kernel_size=1, stride=1, padding=0)
         normal_init(self.conv1, 0, 0.01)
         normal_init(self.score, 0, 0.01)
         normal_init(self.loc, 0, 0.01)
@@ -103,23 +103,33 @@ class RegionProposalNetwork(nn.Module):
             np.array(self.anchor_base),
             self.feat_stride, hh, ww)
 
-        n_anchor = anchor.shape[0] // (hh * ww)
-        h = F.relu(self.conv1(x))
-
-        rpn_locs = self.loc(h)
+        n_anchor = anchor.shape[0] // (hh * ww) # n_anchor: number of anchors for single image
+        
+        # step 1, 3x3 convolution
+        h = F.relu(self.conv1(x)) 
+        
+        # step 2, 1x1 convolution and get rpn_locs
+        rpn_locs = self.loc(h) # rpn_locs shape: (N, 4*n_anchors, H, W)
         # UNNOTE: check whether need contiguous
         # A: Yes
-        rpn_locs = rpn_locs.permute(0, 2, 3, 1).contiguous().view(n, -1, 4)
+        # shape after permute: (N, H, W, 4*n_anchors)
+        # shape after view: (N, H*W*n_anchors, 4)
+        rpn_locs = rpn_locs.permute(0, 2, 3, 1).contiguous().view(n, -1, 4) 
+        
+        # step 3, 1x1 convolution and get score of background and foreground
         rpn_scores = self.score(h)
         rpn_scores = rpn_scores.permute(0, 2, 3, 1).contiguous()
-        rpn_softmax_scores = F.softmax(rpn_scores.view(n, hh, ww, n_anchor, 2), dim=4)
-        rpn_fg_scores = rpn_softmax_scores[:, :, :, :, 1].contiguous()
-        rpn_fg_scores = rpn_fg_scores.view(n, -1)
         rpn_scores = rpn_scores.view(n, -1, 2)
-
+        
+        # step 4, 
+        rpn_softmax_scores = F.softmax(rpn_scores.view(n, hh, ww, n_anchor, 2), dim=4)
+        rpn_fg_scores = rpn_softmax_scores[:, :, :, :, 1].contiguous() # 0: background, 1: foreground
+        rpn_fg_scores = rpn_fg_scores.view(n, -1)
+        
+        # step 5, get proposal region by non-max suppression 
         rois = list()
         roi_indices = list()
-        for i in range(n):
+        for i in range(n): # loop batch
             roi = self.proposal_layer(
                 rpn_locs[i].cpu().data.numpy(),
                 rpn_fg_scores[i].cpu().data.numpy(),

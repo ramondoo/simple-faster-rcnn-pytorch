@@ -393,6 +393,8 @@ class ProposalCreator:
 
         # Convert anchors into proposal via bbox transformations.
         # roi = loc2bbox(anchor, loc)
+
+        # convert loc into roi(anchor)
         roi = loc2bbox(anchor, loc)
 
         # Clip predicted boxes to image.

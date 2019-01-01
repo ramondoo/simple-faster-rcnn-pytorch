@@ -124,13 +124,16 @@ class FasterRCNN(nn.Module):
                 :math:`(R',)`.
 
         """
-        img_size = x.shape[2:]
+        img_size = x.shape[2:]   # height and width
 
         h = self.extractor(x)
+
         rpn_locs, rpn_scores, rois, roi_indices, anchor = \
             self.rpn(h, img_size, scale)
+
         roi_cls_locs, roi_scores = self.head(
             h, rois, roi_indices)
+
         return roi_cls_locs, roi_scores, rois, roi_indices
 
     def use_preset(self, preset):
@@ -218,23 +221,25 @@ class FasterRCNN(nn.Module):
             prepared_imgs = list()
             sizes = list()
             for img in imgs:
-                size = img.shape[1:]
+                size = img.shape[1:]  # HW
                 img = preprocess(at.tonumpy(img))
+
                 prepared_imgs.append(img)
                 sizes.append(size)
         else:
-             prepared_imgs = imgs 
+             prepared_imgs = imgs
+
         bboxes = list()
         labels = list()
         scores = list()
         for img, size in zip(prepared_imgs, sizes):
             img = at.totensor(img[None]).float()
-            scale = img.shape[3] / size[1]
+            scale = img.shape[3] / size[1]                               # preprocessed / original
             roi_cls_loc, roi_scores, rois, _ = self(img, scale=scale)
             # We are assuming that batch size is 1.
-            roi_score = roi_scores.data
-            roi_cls_loc = roi_cls_loc.data
-            roi = at.totensor(rois) / scale
+            roi_score = roi_scores.data                                  # (R, L+1), what is data for?
+            roi_cls_loc = roi_cls_loc.data                               # (R, (L+1)*4)
+            roi = at.totensor(rois) / scale                              # to original image ?
 
             # Convert predictions to bounding boxes in image coordinates.
             # Bounding boxes are scaled to the scale of the input images.
@@ -245,19 +250,22 @@ class FasterRCNN(nn.Module):
 
             roi_cls_loc = (roi_cls_loc * std + mean)
             roi_cls_loc = roi_cls_loc.view(-1, self.n_class, 4)
+
             roi = roi.view(-1, 1, 4).expand_as(roi_cls_loc)
+
             cls_bbox = loc2bbox(at.tonumpy(roi).reshape((-1, 4)),
                                 at.tonumpy(roi_cls_loc).reshape((-1, 4)))
+
             cls_bbox = at.totensor(cls_bbox)
-            cls_bbox = cls_bbox.view(-1, self.n_class * 4)
+            cls_bbox = cls_bbox.view(-1, self.n_class * 4)  # (R, (L+1)*4)
             # clip bounding box
             cls_bbox[:, 0::2] = (cls_bbox[:, 0::2]).clamp(min=0, max=size[0])
             cls_bbox[:, 1::2] = (cls_bbox[:, 1::2]).clamp(min=0, max=size[1])
 
             prob = at.tonumpy(F.softmax(at.totensor(roi_score), dim=1))
 
-            raw_cls_bbox = at.tonumpy(cls_bbox)
-            raw_prob = at.tonumpy(prob)
+            raw_cls_bbox = at.tonumpy(cls_bbox)             # (R, (L+1)*4)
+            raw_prob = at.tonumpy(prob)                     # (R, L+1)
 
             bbox, label, score = self._suppress(raw_cls_bbox, raw_prob)
             bboxes.append(bbox)

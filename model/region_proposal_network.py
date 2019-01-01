@@ -96,40 +96,44 @@ class RegionProposalNetwork(nn.Module):
                 which RoIs correspond to. Its shape is :math:`(R',)`.
             * **anchor**: Coordinates of enumerated shifted anchors. \
                 Its shape is :math:`(H W A, 4)`.
-
         """
+
         n, _, hh, ww = x.shape
+
+        # anchor_base shape: (A, 4)
+        # anchor shape: (hh * ww * A, 4)
         anchor = _enumerate_shifted_anchor(
             np.array(self.anchor_base),
             self.feat_stride, hh, ww)
 
-        n_anchor = anchor.shape[0] // (hh * ww) # n_anchor: number of anchors for single image
+        n_anchor = anchor.shape[0] // (hh * ww)  # n_anchor: A
         
         # step 1, 3x3 convolution
         h = F.relu(self.conv1(x)) 
         
-        # step 2, 1x1 convolution and get rpn_locs
-        rpn_locs = self.loc(h) # rpn_locs shape: (N, 4*n_anchors, H, W)
+        # step 2, get rpn_locs by 1x1 convolution
+        rpn_locs = self.loc(h)  # rpn_locs shape: (N, 4*n_anchors, H, W)
+
         # UNNOTE: check whether need contiguous
         # A: Yes
+
         # shape after permute: (N, H, W, 4*n_anchors)
         # shape after view: (N, H*W*n_anchors, 4)
         rpn_locs = rpn_locs.permute(0, 2, 3, 1).contiguous().view(n, -1, 4) 
         
-        # step 3, 1x1 convolution and get score of background and foreground
+        # step 3, get probability of foreground by 1x1 convolution
         rpn_scores = self.score(h)
         rpn_scores = rpn_scores.permute(0, 2, 3, 1).contiguous()
         rpn_scores = rpn_scores.view(n, -1, 2)
         
-        # step 4, 
+        # step 4, get proposal region by non-max suppression
         rpn_softmax_scores = F.softmax(rpn_scores.view(n, hh, ww, n_anchor, 2), dim=4)
         rpn_fg_scores = rpn_softmax_scores[:, :, :, :, 1].contiguous() # 0: background, 1: foreground
         rpn_fg_scores = rpn_fg_scores.view(n, -1)
-        
-        # step 5, get proposal region by non-max suppression 
+
         rois = list()
         roi_indices = list()
-        for i in range(n): # loop batch
+        for i in range(n):  # loop over images in batch
             roi = self.proposal_layer(
                 rpn_locs[i].cpu().data.numpy(),
                 rpn_fg_scores[i].cpu().data.numpy(),

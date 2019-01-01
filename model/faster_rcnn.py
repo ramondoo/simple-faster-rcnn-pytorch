@@ -73,7 +73,7 @@ class FasterRCNN(nn.Module):
                 loc_normalize_std = (0.1, 0.1, 0.2, 0.2)
     ):
         super(FasterRCNN, self).__init__()
-        self.extractor = extractor
+        self.extractor = extractor            # feature
         self.rpn = rpn
         self.head = head
 
@@ -128,6 +128,9 @@ class FasterRCNN(nn.Module):
 
         h = self.extractor(x)
 
+
+        # rpn_locs:   (N, H*W*n_anchors, 4)
+        # rpn_scores: (N, H*W*n_anchors, 2)
         rpn_locs, rpn_scores, rois, roi_indices, anchor = \
             self.rpn(h, img_size, scale)
 

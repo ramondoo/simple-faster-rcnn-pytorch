@@ -6,41 +6,57 @@ kernel_forward = '''
                 const int width, const int pooled_height, 
                 const int pooled_width,const int NN
     ){
+    """ ROI pooling forward cuda code
+    
+    Every thread is responsible for the calculation of one point in the result(top data) 
+    
+    Args:
+        bottom_data: feature map from the extractor, shape: (N, C, H, W)
+        bottom_rois: shape: (R, 5), R is the number of ROIs, each roi contains [batch_idx, minx, miny, maxx, maxyy]
+        top_data: ROI max pooling result, shape: (R, C, pooled_height, pooled_width)
+        argmax_data: recording where the maximum is located
+        spatial_scale: ?
+        channels: feature map channels
+        height: height of feature map
+        width: width of feature map
+        pooled_height: 
+        pooled_width:
+        NN: total number of data points of the result
         
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    """ 
+    int idx = blockIdx.x * blockDim.x + threadIdx.x; # thread index
+    
     if(idx>=NN)
         return;
+        
+    # determine the coordinate of point in result for which current thread is responsible.
     const int pw = idx % pooled_width;
     const int ph = (idx / pooled_width) % pooled_height;
-    const int c = (idx / pooled_width / pooled_height) % channels;
-    int num = idx / pooled_width / pooled_height / channels;
+    const int c = (idx / pooled_width / pooled_height) % channels; # channel
+    int num = idx / pooled_width / pooled_height / channels;       # roi index
+    
     const int roi_batch_ind = bottom_rois[num * 5 + 0];
     const int roi_start_w = round(bottom_rois[num * 5 + 1] * spatial_scale);
     const int roi_start_h = round(bottom_rois[num * 5 + 2] * spatial_scale);
     const int roi_end_w = round(bottom_rois[num * 5 + 3] * spatial_scale);
     const int roi_end_h = round(bottom_rois[num * 5 + 4] * spatial_scale);
+    
     // Force malformed ROIs to be 1x1
     const int roi_width = max(roi_end_w - roi_start_w + 1, 1);
     const int roi_height = max(roi_end_h - roi_start_h + 1, 1);
-    const float bin_size_h = static_cast<float>(roi_height)
-                    / static_cast<float>(pooled_height);
-    const float bin_size_w = static_cast<float>(roi_width)
-                    / static_cast<float>(pooled_width);
+    const float bin_size_h = static_cast<float>(roi_height) / static_cast<float>(pooled_height);
+    const float bin_size_w = static_cast<float>(roi_width) / static_cast<float>(pooled_width);
 
-    int hstart = static_cast<int>(floor(static_cast<float>(ph)
-                                    * bin_size_h));
-        int wstart = static_cast<int>(floor(static_cast<float>(pw)
-                                    * bin_size_w));
-    int hend = static_cast<int>(ceil(static_cast<float>(ph + 1)
-                                * bin_size_h));
-        int wend = static_cast<int>(ceil(static_cast<float>(pw + 1)
-                                * bin_size_w));
+    int hstart = static_cast<int>(floor(static_cast<float>(ph) * bin_size_h));
+    int wstart = static_cast<int>(floor(static_cast<float>(pw) * bin_size_w));
+    int hend = static_cast<int>(ceil(static_cast<float>(ph + 1) * bin_size_h));
+    int wend = static_cast<int>(ceil(static_cast<float>(pw + 1) * bin_size_w));
 
     // Add roi offsets and clip to input boundaries
     hstart = min(max(hstart + roi_start_h, 0), height);
-    hend = min(max(hend + roi_start_h, 0), height);
+    hend   = min(max(hend + roi_start_h, 0), height);
     wstart = min(max(wstart + roi_start_w, 0), width);
-    wend = min(max(wend + roi_start_w, 0), width);
+    wend   = min(max(wend + roi_start_w, 0), width);
     bool is_empty = (hend <= hstart) || (wend <= wstart);
 
     // Define an empty pooling region to be zero
